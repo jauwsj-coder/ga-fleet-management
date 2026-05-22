@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Login - GA Operations System</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+</head>
+<body class="login-page">
+  <main class="login-shell">
+    <section class="login-panel">
+      <div class="brand-mark">GA</div>
+      <h1>GA Operations System</h1>
+      <p data-i18n="subtitle">Fleet & Vehicle Management</p>
+
+      <form action="{{ url_for('login') }}" method="post" class="login-form">
+        <label for="language" data-i18n="languageLabel">Bahasa</label>
+        <span class="select-wrap">
+          <select id="language" name="language">
+            <option value="id">Bahasa Indonesia</option>
+            <option value="en">English</option>
+          </select>
+        </span>
+        <label for="nik" data-i18n="nikLabel">Masukkan NIK</label>
+        <input id="nik" name="nik" type="text" placeholder="NIK" autofocus required>
+        <button type="submit" data-i18n="loginButton">Masuk</button>
+      </form>
+
+      {% if error %}
+      <div class="alert danger">{{ error }}</div>
+      {% endif %}
+    </section>
+  </main>
+  <script>
+    const loginCopy = {
+      id: {
+        subtitle: "Fleet & Vehicle Management",
+        languageLabel: "Bahasa",
+        nikLabel: "Masukkan NIK",
+        loginButton: "Masuk"
+      },
+      en: {
+        subtitle: "Fleet & Vehicle Management",
+        languageLabel: "Language",
+        nikLabel: "Enter Employee ID",
+        loginButton: "Login"
+      }
+    };
+    const languageSelect = document.getElementById("language");
+    const savedLanguage = localStorage.getItem("gaLanguage") || "id";
+    languageSelect.value = savedLanguage;
+    function applyLoginLanguage(lang) {
+      localStorage.setItem("gaLanguage", lang);
+      document.documentElement.lang = lang;
+      document.querySelectorAll("[data-i18n]").forEach((node) => {
+        node.textContent = loginCopy[lang][node.dataset.i18n];
+      });
+    }
+    languageSelect.addEventListener("change", () => applyLoginLanguage(languageSelect.value));
+    applyLoginLanguage(savedLanguage);
+  </script>
+</body>
+</html>
