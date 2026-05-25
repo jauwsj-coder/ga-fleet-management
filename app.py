@@ -820,9 +820,12 @@ def seed_data() -> None:
         conn.commit()
 
 
-@app.before_request
-def ensure_db() -> None:
-    seed_data()
+seed_data()
+
+
+@app.get("/healthz")
+def healthz():
+    return jsonify({"ok": True})
 
 
 @app.get("/")
