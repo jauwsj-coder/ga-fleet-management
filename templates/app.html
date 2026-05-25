@@ -8,17 +8,18 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
-  <script defer src="{{ url_for('static', filename='js/app.js') }}?v=booking-no-past-1"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+  <script defer src="{{ url_for('static', filename='js/app.js') }}?v=i18n-consistency-1"></script>
 </head>
 <body>
   <header class="topbar">
     <div>
-      <p class="eyebrow">Fleet & Vehicle Management</p>
+      <p class="eyebrow" data-i18n="appEyebrow">Manajemen Armada & Kendaraan</p>
       <h1>GA Operations System</h1>
     </div>
     <div class="topbar-actions">
       <div class="notification-wrap">
-        <button id="vehicle-alert-button" class="notification-button" type="button" aria-label="Vehicle document notifications">
+        <button id="vehicle-alert-button" class="notification-button" type="button" aria-label="Vehicle document notifications" data-i18n-aria="vehicleDocumentNotifications">
           <span class="bell-icon">&#128276;</span>
           <span id="vehicle-alert-count" class="notification-count hidden">0</span>
         </button>
@@ -33,7 +34,7 @@
       <div class="profile">
       <strong>{{ emp.full_name }}</strong>
       <span>{{ emp.position }} - {{ emp.department }}</span>
-      <span>{{ emp.roles | map('replace', '_', ' ') | join(', ') | title }}</span>
+      <span data-role-list="{{ emp.roles | join(',') }}">{{ emp.roles | map('replace', '_', ' ') | join(', ') | title }}</span>
       <a href="{{ url_for('logout') }}" data-i18n="logout">Logout</a>
       </div>
     </div>
@@ -42,6 +43,7 @@
   <main class="layout">
     <aside class="sidebar">
       <button class="nav-item active" data-tab="dashboard" data-i18n="navDashboard">Dashboard</button>
+      <button class="nav-item" data-tab="driver-schedule-dashboard" data-i18n="navDriverScheduleDashboard">Dashboard Jadwal Driver</button>
       {% if 'user' in emp.roles or 'super_admin' in emp.roles %}
       <button class="nav-item" data-tab="booking" data-i18n="navBooking">Booking</button>
       <button class="nav-item" data-tab="history" data-i18n="navHistory">Riwayat Saya</button>
@@ -59,11 +61,28 @@
       {% if 'driver' in emp.roles or 'super_admin' in emp.roles %}
       <button class="nav-item" data-tab="driver" data-i18n="navDriver">Driver Mobile</button>
       {% endif %}
+      {% if 'driver' in emp.roles %}
+      <button class="nav-item" data-tab="p2h-checklist" data-i18n="navP2hChecklist">Checklist P2H</button>
+      {% endif %}
+      {% if 'ga_admin' in emp.roles or 'super_admin' in emp.roles %}
+      <button class="nav-item" data-tab="p2h-report" data-i18n="navP2hReport">Laporan P2H</button>
+      {% endif %}
+      <button class="nav-item nav-guide" data-tab="guide" data-i18n="navGuide">Panduan & Teknis</button>
+      {% if 'ga_admin' in emp.roles or 'super_admin' in emp.roles %}
+      <button class="nav-item" data-tab="backup-restore" data-i18n="navBackupRestore">Backup & Restore</button>
+      {% endif %}
     </aside>
 
     <section class="content">
       {% if request.args.get('error') %}
-      <div id="page-alert" class="alert danger">{{ request.args.get('error') }}</div>
+      <div id="page-alert" class="alert {{ 'warning full-booked-alert' if request.args.get('full_booked') else 'danger' }}">
+        <div class="alert-message">{{ request.args.get('error') }}</div>
+        {% if request.args.get('full_booked') %}
+        <div class="alert-actions">
+          <button class="button secondary" type="button" data-open-tab="driver-schedule-dashboard" data-i18n="viewDriverScheduleDashboard">Lihat Dashboard Jadwal Driver</button>
+        </div>
+        {% endif %}
+      </div>
       {% endif %}
 
       <section id="dashboard" class="tab-panel active">
@@ -83,35 +102,50 @@
             {% endif %}
           </div>
         </div>
-        <div class="panel">
-          <div class="section-head compact-head">
-            <h3 data-i18n="performanceChartTitle">Grafik Performance GA</h3>
+        <div id="departure-alerts" class="departure-alert-list"></div>
+        <div class="panel performance-panel">
+          <div class="performance-card-head">
+            <div class="performance-title-wrap">
+              <span class="performance-icon" aria-hidden="true">GA</span>
+              <div>
+                <h3 data-i18n="performanceChartTitle">Grafik Performance GA</h3>
+                <p data-i18n="performanceChartSubtitle">Monitoring request kendaraan per periode</p>
+              </div>
+            </div>
             <div class="chart-controls interval-controls">
               <span class="interval-label" data-i18n="monitoringInterval">Interval Monitoring:</span>
-              <span class="select-wrap month-select"><select id="performance-start-month-filter" aria-label="Start month"></select></span>
-              <span class="select-wrap year-select"><select id="performance-start-year-filter" aria-label="Start year"></select></span>
+              <span class="select-wrap month-select"><select id="performance-start-month-filter" aria-label="Start month" data-i18n-aria="startMonth"></select></span>
+              <span class="select-wrap year-select"><select id="performance-start-year-filter" aria-label="Start year" data-i18n-aria="startYear"></select></span>
               <span class="interval-separator" data-i18n="until">sd</span>
-              <span class="select-wrap month-select"><select id="performance-end-month-filter" aria-label="End month"></select></span>
-              <span class="select-wrap year-select"><select id="performance-end-year-filter" aria-label="End year"></select></span>
+              <span class="select-wrap month-select"><select id="performance-end-month-filter" aria-label="End month" data-i18n-aria="endMonth"></select></span>
+              <span class="select-wrap year-select"><select id="performance-end-year-filter" aria-label="End year" data-i18n-aria="endYear"></select></span>
             </div>
           </div>
-          <div id="performance-chart"></div>
+          <div id="performance-chart-summary" class="performance-mini-stats"></div>
+          <div class="performance-chart-box">
+            <canvas id="performance-chart-canvas" aria-label="Grafik Performance GA" data-i18n-aria="performanceChartTitle"></canvas>
+            <div id="performance-chart"></div>
+          </div>
         </div>
         <div class="stats-grid">
           <article class="stat-card"><span data-i18n="statTotal">Total Request</span><strong id="stat-total">0</strong></article>
           <article class="stat-card"><span data-i18n="statPending">Pending Approval</span><strong id="stat-pending">0</strong></article>
+          <article class="stat-card"><span data-i18n="statWaitingTrip">Menunggu Perjalanan</span><strong id="stat-waiting-trip">0</strong></article>
           <article class="stat-card"><span data-i18n="statAssigned">Assigned / On Trip</span><strong id="stat-assigned">0</strong></article>
           <article class="stat-card"><span data-i18n="statCompleted">Completed</span><strong id="stat-completed">0</strong></article>
+          <article class="stat-card rejected"><span data-i18n="statRejected">Ditolak</span><strong id="stat-rejected">0</strong></article>
         </div>
         <div id="review-warning" class="alert warning hidden"></div>
         <div class="panel">
           <h3 data-i18n="scoreboardTitle">GA Performance Scoreboard</h3>
           <div id="scoreboard-list"></div>
         </div>
+        {% if 'ga_admin' in emp.roles or 'super_admin' in emp.roles %}
         <div class="panel">
           <h3 data-i18n="vehicleHealthTitle">Dashboard Kesehatan Kendaraan</h3>
           <div id="vehicle-health-list"></div>
         </div>
+        {% endif %}
         <div class="panel">
           <h3 data-i18n="driverSchedule">Driver Schedule</h3>
           <div id="schedule-calendar"></div>
@@ -121,6 +155,24 @@
           <h3 data-i18n="tripMonitoring">Monitoring Perjalanan</h3>
           <div id="dashboard-list" class="card-list"></div>
           <div id="dashboard-pagination" class="pagination"></div>
+        </div>
+      </section>
+
+      <section id="driver-schedule-dashboard" class="tab-panel">
+        <div class="section-head">
+          <div>
+            <h2 data-i18n="driverScheduleDashboardTitle">Dashboard Jadwal Driver</h2>
+            <p data-i18n="driverScheduleDashboardSubtitle">Informasi jadwal, ketersediaan driver, kendaraan, dan slot waktu.</p>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="schedule-filter-bar">
+            <label><span data-i18n="startDate">Tanggal</span><input id="driver-schedule-date-filter" type="date"></label>
+            <label><span data-i18n="driver">Driver</span><select id="driver-schedule-driver-filter"></select></label>
+            <label><span data-i18n="vehicle">Kendaraan</span><select id="driver-schedule-vehicle-filter"></select></label>
+            <label><span data-i18n="quickSearch">Search Cepat</span><input id="driver-schedule-search" type="search" placeholder="Driver, kendaraan, tujuan..." data-i18n-placeholder="driverScheduleSearchPlaceholder"></label>
+          </div>
+          <div id="driver-schedule-dashboard-content"></div>
         </div>
       </section>
 
@@ -147,15 +199,23 @@
             <label><input type="radio" name="plate_rule" value="ganjil"> <span data-i18n="plateOdd">Ganjil</span></label>
             <label><input type="radio" name="plate_rule" value="genap"> <span data-i18n="plateEven">Genap</span></label>
           </fieldset>
-          <label><span data-i18n="mapUrl">Google Maps Link</span><input name="map_url" type="url" placeholder="https://maps.google.com/..."></label>
+          <label><span data-i18n="mapUrl">Google Maps Link</span><input name="map_url" type="url" placeholder="https://maps.google.com/..." data-i18n-placeholder="mapPlaceholder"></label>
           <label class="span-2"><span data-i18n="notes">Catatan Tambahan</span><textarea name="notes" rows="3"></textarea></label>
-          <button class="button primary span-2" type="submit" data-i18n="submitRequest">Kirim Request</button>
+          <button class="button primary span-2" type="submit" data-i18n="submitRequest" {% if request.args.get('full_booked') %}disabled{% endif %}>Kirim Request</button>
         </form>
       </section>
 
       <section id="history" class="tab-panel">
         <div class="section-head"><div><h2 data-i18n="navHistory">Riwayat Saya</h2><p data-i18n="historySubtitle">Review wajib untuk perjalanan yang selesai.</p></div></div>
+        <div class="panel compact">
+          <div class="history-filter-bar">
+            <label><span data-i18n="filterStartDate">Dari Tanggal</span><input id="history-start-filter" type="date"></label>
+            <label><span data-i18n="filterEndDate">Sampai Tanggal</span><input id="history-end-filter" type="date"></label>
+            <button id="history-clear-filter" class="button secondary" type="button" data-i18n="clearFilter">Reset Filter</button>
+          </div>
+        </div>
         <div id="history-list" class="card-list"></div>
+        <div id="history-pagination" class="pagination"></div>
       </section>
 
       <section id="approval" class="tab-panel">
@@ -165,12 +225,29 @@
 
       <section id="ga" class="tab-panel">
         <div class="section-head"><div><h2 data-i18n="navGa">GA Control</h2><p data-i18n="gaSubtitle">Assign kendaraan dan driver dengan conflict detection.</p></div></div>
+        <div id="ga-departure-alerts" class="departure-alert-list"></div>
         <div id="ga-list" class="card-list"></div>
       </section>
 
       <section id="driver" class="tab-panel">
         <div class="section-head"><div><h2 data-i18n="navDriver">Driver Mobile Page</h2><p data-i18n="driverSubtitle">Mulai dan selesaikan perjalanan dari halaman ini.</p></div></div>
+        <div id="driver-departure-alerts" class="departure-alert-list"></div>
         <div id="driver-list" class="card-list"></div>
+      </section>
+
+      <section id="p2h-checklist" class="tab-panel">
+        <div class="section-head"><div><h2 data-i18n="p2hChecklistTitle">Checklist P2H</h2><p data-i18n="p2hChecklistSubtitle">Pemeriksaan dan pengecekan harian kendaraan oleh driver.</p></div></div>
+        <div id="p2h-driver-alerts" class="departure-alert-list"></div>
+        <div id="p2h-checklist-content"></div>
+      </section>
+
+      <section id="p2h-report" class="tab-panel">
+        <div class="section-head">
+          <div><h2 data-i18n="p2hReportTitle">Laporan P2H</h2><p data-i18n="p2hReportSubtitle">Summary, analytics, dan tindak lanjut pemeriksaan harian kendaraan.</p></div>
+          <a id="p2h-export-link" class="button secondary" href="{{ url_for('export_p2h') }}" data-i18n="downloadP2hReport">Download Laporan P2H</a>
+        </div>
+        <div id="p2h-ga-alerts" class="departure-alert-list"></div>
+        <div id="p2h-report-content"></div>
       </section>
 
       <section id="vehicles" class="tab-panel">
@@ -182,12 +259,12 @@
           <label><span data-i18n="capacity">Seat Capacity</span><input name="capacity" type="number" min="1" required></label>
           <label><span data-i18n="stnkDate">Tanggal STNK</span><input name="stnk_expiry_date" type="date"></label>
           <label><span data-i18n="kirDate">Tanggal KIR</span><input name="kir_expiry_date" type="date"></label>
-          <label class="span-2"><span data-i18n="vehicleStatus">Vehicle Status</span>
+          <label><span data-i18n="vehicleStatus">Vehicle Status</span>
             <span class="select-wrap">
               <select name="status">
-                <option value="AVAILABLE">Available</option>
-                <option value="MAINTENANCE">Maintenance</option>
-                <option value="ASSIGNED">Assigned</option>
+                <option value="AVAILABLE" data-i18n="vehicleStatusAvailable">Tersedia</option>
+                <option value="MAINTENANCE" data-i18n="vehicleStatusMaintenance">Maintenance</option>
+                <option value="ASSIGNED" data-i18n="vehicleStatusAssigned">Assigned</option>
               </select>
             </span>
           </label>
@@ -197,6 +274,10 @@
           <h3 data-i18n="vehicleList">Vehicle List</h3>
           <div id="vehicle-list" class="table-wrap"></div>
         </div>
+        <div class="panel">
+          <h3 data-i18n="driverManagement">Manajemen Driver</h3>
+          <div id="driver-management-list" class="table-wrap"></div>
+        </div>
       </section>
 
       <section id="maintenance" class="tab-panel">
@@ -205,6 +286,7 @@
             <h2 data-i18n="maintenanceTitle">Preventive Maintenance</h2>
             <p data-i18n="maintenanceSubtitle">Monitoring perawatan berkala kendaraan berdasarkan KM dan bulan perawatan.</p>
           </div>
+          <a class="button secondary" href="{{ url_for('export_maintenance') }}" data-i18n="exportExcel">Export Excel</a>
         </div>
         <div class="panel">
           <div id="maintenance-list" class="table-wrap"></div>
@@ -222,11 +304,11 @@
         <div class="panel">
           <div class="review-filter-bar">
             <span class="interval-label" data-i18n="monitoringInterval">Interval Monitoring:</span>
-            <span class="select-wrap month-select"><select id="review-start-month-filter" aria-label="Review start month"></select></span>
-            <span class="select-wrap year-select"><select id="review-start-year-filter" aria-label="Review start year"></select></span>
+            <span class="select-wrap month-select"><select id="review-start-month-filter" aria-label="Review start month" data-i18n-aria="startMonth"></select></span>
+            <span class="select-wrap year-select"><select id="review-start-year-filter" aria-label="Review start year" data-i18n-aria="startYear"></select></span>
             <span class="interval-separator" data-i18n="until">sd</span>
-            <span class="select-wrap month-select"><select id="review-end-month-filter" aria-label="Review end month"></select></span>
-            <span class="select-wrap year-select"><select id="review-end-year-filter" aria-label="Review end year"></select></span>
+            <span class="select-wrap month-select"><select id="review-end-month-filter" aria-label="Review end month" data-i18n-aria="endMonth"></select></span>
+            <span class="select-wrap year-select"><select id="review-end-year-filter" aria-label="Review end year" data-i18n-aria="endYear"></select></span>
           </div>
           <div id="user-review-list" class="table-wrap"></div>
           <div id="user-review-pagination" class="pagination"></div>
@@ -238,12 +320,12 @@
         <form class="form-grid panel compact" method="post" action="{{ url_for('add_employee') }}">
           <label>NIK<input name="nik" required></label>
           <label><span data-i18n="fullName">Nama Lengkap</span><input name="full_name" required></label>
-          <label>Jabatan
+          <label><span data-i18n="position">Jabatan</span>
             <span class="select-wrap">
               <select id="employee-position" name="position" data-option-kind="position" required></select>
             </span>
           </label>
-          <label>Departemen
+          <label><span data-i18n="department">Departemen</span>
             <span class="select-wrap">
               <select id="employee-department" name="department" data-option-kind="department" required></select>
             </span>
@@ -251,11 +333,11 @@
           <label><span data-i18n="supervisorNik">Pimpinan NIK</span><input name="supervisor_nik"></label>
           <label><span data-i18n="phone">No Telp</span><input name="phone" required></label>
           <div class="span-2 checks">
-            <label><input type="checkbox" name="roles" value="user" checked> User</label>
-            <label><input type="checkbox" name="roles" value="pimpinan"> Pimpinan</label>
-            <label><input type="checkbox" name="roles" value="ga_admin"> GA Admin</label>
-            <label><input type="checkbox" name="roles" value="driver"> Driver</label>
-            <label><input type="checkbox" name="roles" value="super_admin"> Super Admin</label>
+            <label><input type="checkbox" name="roles" value="user" checked> <span data-i18n="roleUser">User</span></label>
+            <label><input type="checkbox" name="roles" value="pimpinan"> <span data-i18n="roleLeader">Pimpinan</span></label>
+            <label><input type="checkbox" name="roles" value="ga_admin"> <span data-i18n="roleGaAdmin">GA Admin</span></label>
+            <label><input type="checkbox" name="roles" value="driver"> <span data-i18n="roleDriver">Driver</span></label>
+            <label><input type="checkbox" name="roles" value="super_admin"> <span data-i18n="roleSuperAdmin">Super Admin</span></label>
           </div>
           <button class="button primary span-2" type="submit" data-i18n="addEmployee">Tambah Employee</button>
         </form>
@@ -288,6 +370,44 @@
           </div>
         </div>
       </section>
+
+      <section id="backup-restore" class="tab-panel">
+        <div class="section-head">
+          <div>
+            <h2 data-i18n="backupRestoreTitle">Backup & Restore Database</h2>
+            <p data-i18n="backupRestoreSubtitle">Backup manual database aplikasi dan restore khusus Super Admin.</p>
+          </div>
+          <form method="post" action="{{ url_for('create_backup') }}" data-ajax-form>
+            <button class="button primary" type="submit" data-i18n="backupDatabase">Backup Database</button>
+          </form>
+        </div>
+        <div id="backup-restore-content"></div>
+      </section>
+
+      <section id="guide" class="tab-panel">
+        <div class="section-head">
+          <div>
+            <h2 data-i18n="guideTitle">Panduan & Teknis</h2>
+            <p data-i18n="guideSubtitle">Cari scope role, flow, aturan, dan langkah penggunaan sistem.</p>
+          </div>
+          <a class="button secondary" href="{{ url_for('export_guide_pdf') }}" data-i18n="downloadGuidePdf">Unduh PDF</a>
+        </div>
+        <div class="panel guide-panel">
+          <div class="guide-assistant">
+            <label class="guide-search">
+              <span data-i18n="guideAskLabel">Tanya Panduan</span>
+              <input id="guide-question" type="search" placeholder="Contoh: bagaimana cara approve request?" data-i18n-placeholder="guideAskPlaceholder">
+            </label>
+            <button id="guide-ask-button" class="button primary" type="button" data-i18n="guideAskButton">Tanya</button>
+            <div id="guide-answer" class="guide-answer"></div>
+          </div>
+          <label class="guide-search">
+            <span data-i18n="guideSearchLabel">Cari Panduan</span>
+            <input id="guide-search" type="search" placeholder="Cari booking, approval, driver, review..." data-i18n-placeholder="guideSearchPlaceholder">
+          </label>
+          <div id="guide-content" class="guide-grid"></div>
+        </div>
+      </section>
     </section>
   </main>
 
@@ -300,12 +420,12 @@
       <form id="employee-edit-form" class="form-grid compact" method="post">
         <label>NIK<input id="edit-nik" disabled></label>
         <label><span data-i18n="fullName">Nama Lengkap</span><input id="edit-full-name" name="full_name" required></label>
-        <label>Jabatan
+        <label><span data-i18n="position">Jabatan</span>
           <span class="select-wrap">
             <select id="edit-position" name="position" data-option-kind="position" required></select>
           </span>
         </label>
-        <label>Departemen
+        <label><span data-i18n="department">Departemen</span>
           <span class="select-wrap">
             <select id="edit-department" name="department" data-option-kind="department" required></select>
           </span>
@@ -313,11 +433,11 @@
         <label><span data-i18n="supervisorNik">Pimpinan NIK</span><input id="edit-supervisor" name="supervisor_nik"></label>
         <label><span data-i18n="phone">No Telp</span><input id="edit-phone" name="phone" required></label>
         <div class="span-2 checks">
-          <label><input class="edit-role" type="checkbox" name="roles" value="user"> User</label>
-          <label><input class="edit-role" type="checkbox" name="roles" value="pimpinan"> Pimpinan</label>
-          <label><input class="edit-role" type="checkbox" name="roles" value="ga_admin"> GA Admin</label>
-          <label><input class="edit-role" type="checkbox" name="roles" value="driver"> Driver</label>
-          <label><input class="edit-role" type="checkbox" name="roles" value="super_admin"> Super Admin</label>
+          <label><input class="edit-role" type="checkbox" name="roles" value="user"> <span data-i18n="roleUser">User</span></label>
+          <label><input class="edit-role" type="checkbox" name="roles" value="pimpinan"> <span data-i18n="roleLeader">Pimpinan</span></label>
+          <label><input class="edit-role" type="checkbox" name="roles" value="ga_admin"> <span data-i18n="roleGaAdmin">GA Admin</span></label>
+          <label><input class="edit-role" type="checkbox" name="roles" value="driver"> <span data-i18n="roleDriver">Driver</span></label>
+          <label><input class="edit-role" type="checkbox" name="roles" value="super_admin"> <span data-i18n="roleSuperAdmin">Super Admin</span></label>
         </div>
         <div class="span-2 modal-actions">
           <button class="button secondary" type="button" data-close-modal data-i18n="cancel">Batal</button>
