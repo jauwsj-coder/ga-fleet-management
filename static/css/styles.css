@@ -2102,11 +2102,55 @@ th {
   word-break: break-word;
 }
 
+.data-management-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.data-management-card span,
+.data-management-card small {
+  color: var(--muted);
+  display: block;
+}
+
+.data-management-card strong {
+  display: block;
+  font-size: 28px;
+  margin: 6px 0;
+}
+
+.data-actions-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.data-actions-grid form {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+.status-pill.safe {
+  background: #dcfce7;
+  color: #047857;
+}
+
+.status-pill.muted {
+  background: #eef2ff;
+  color: #3730a3;
+}
+
 @media (max-width: 900px) {
   .p2h-check-grid,
   .p2h-summary-grid,
   .p2h-chart-grid,
-  .backup-summary-grid {
+  .backup-summary-grid,
+  .data-management-grid,
+  .data-actions-grid {
     grid-template-columns: 1fr;
   }
 

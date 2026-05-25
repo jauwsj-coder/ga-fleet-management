@@ -46,6 +46,9 @@ APP_TABLES = [
     "p2h_reports",
     "p2h_checklist_items",
     "p2h_attachments",
+    "data_monthly_summaries",
+    "data_management_audit",
+    "system_logs",
     "p2h_holidays",
     "p2h_workday_overrides",
 ]
@@ -796,6 +799,253 @@ def restore_postgres_json_backup(backup_path: Path) -> None:
                 )
 
 
+MASTER_DATA_TABLES = [
+    ("employees", "Karyawan/User"),
+    ("employee_roles", "Role/Login"),
+    ("drivers", "Driver"),
+    ("vehicles", "Kendaraan"),
+    ("option_lists", "Konfigurasi Jabatan/Departemen"),
+    ("app_meta", "Konfigurasi Sistem"),
+]
+
+TRANSACTION_DATA_TABLES = [
+    ("trip_requests", "Booking, Approval, Trip, Rating/Review"),
+    ("trip_edit_logs", "Log Edit Trip"),
+    ("p2h_reports", "Laporan P2H"),
+    ("p2h_checklist_items", "Detail Checklist P2H"),
+    ("p2h_attachments", "Lampiran P2H"),
+    ("vehicle_maintenance_history", "Riwayat Preventive Maintenance"),
+]
+
+TEMPORARY_DATA_TABLES = [
+    ("system_logs", "Log Error/Activity Lama"),
+    ("data_management_audit", "Audit Data Management"),
+]
+
+PROTECTED_DATA_TABLES = {table for table, _ in MASTER_DATA_TABLES}
+
+
+def format_size_label(size_bytes: int) -> str:
+    if size_bytes >= 1024 * 1024:
+        return f"{size_bytes / 1024 / 1024:.2f} MB"
+    if size_bytes >= 1024:
+        return f"{size_bytes / 1024:.1f} KB"
+    return f"{size_bytes} B"
+
+
+def database_size_info() -> dict:
+    if USE_POSTGRES:
+        with db() as conn:
+            item = conn.execute("select pg_database_size(current_database()) as size_bytes").fetchone()
+            size_bytes = int(item["size_bytes"] or 0) if item else 0
+    else:
+        size_bytes = DB_PATH.stat().st_size if DB_PATH.exists() else 0
+    return {"size_bytes": size_bytes, "size_label": format_size_label(size_bytes)}
+
+
+def count_table(conn, table: str, where: str = "1=1", params: tuple = ()) -> int:
+    if table not in list_tables(conn):
+        return 0
+    item = conn.execute(f"select count(*) as total from {table} where {where}", params).fetchone()
+    return int(item["total"] if isinstance(item, dict) else item[0])
+
+
+def data_management_status() -> dict:
+    with db() as conn:
+        existing = list_tables(conn)
+        def table_items(config):
+            output = []
+            for table, label in config:
+                output.append({
+                    "table": table,
+                    "label": label,
+                    "exists": table in existing,
+                    "count": count_table(conn, table) if table in existing else 0,
+                    "archived_count": count_table(conn, table, "archived_at is not null") if table in existing and "archived_at" in table_columns(conn, table) else 0,
+                    "protected": table in PROTECTED_DATA_TABLES,
+                })
+            return output
+
+        summaries = [
+            dict(item)
+            for item in conn.execute(
+                """
+                select module, summary_month, total_count, metrics_json, archived_at, archived_by
+                from data_monthly_summaries
+                order by summary_month desc, module
+                limit 24
+                """
+            ).fetchall()
+        ] if "data_monthly_summaries" in existing else []
+        audit = [
+            dict(item)
+            for item in conn.execute(
+                """
+                select actor_nik, action, target_module, cutoff_date, affected_rows, detail_json, created_at
+                from data_management_audit
+                order by created_at desc
+                limit 20
+                """
+            ).fetchall()
+        ] if "data_management_audit" in existing else []
+    return {
+        "database": database_size_info(),
+        "master": table_items(MASTER_DATA_TABLES),
+        "transaction": table_items(TRANSACTION_DATA_TABLES),
+        "temporary": table_items(TEMPORARY_DATA_TABLES),
+        "retention": {
+            "error_logs_days": 30,
+            "notifications_days": 60,
+            "archive_after_days": 365,
+        },
+        "summaries": summaries,
+        "audit": audit,
+    }
+
+
+def audit_data_management(conn, actor_nik: str, action: str, module: str, cutoff: str, affected: int, detail: dict | None = None) -> None:
+    conn.execute(
+        """
+        insert into data_management_audit
+        (actor_nik, action, target_module, cutoff_date, affected_rows, detail_json, created_at)
+        values (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            actor_nik,
+            action,
+            module,
+            cutoff,
+            affected,
+            json.dumps(detail or {}, ensure_ascii=False),
+            datetime.now().isoformat(timespec="seconds"),
+        ),
+    )
+
+
+def upsert_monthly_summary(conn, module: str, month: str, total: int, detail: dict, actor_nik: str, archived_at: str) -> None:
+    conn.execute(
+        """
+        insert into data_monthly_summaries
+        (module, summary_month, total_count, metrics_json, archived_at, archived_by)
+        values (?, ?, ?, ?, ?, ?)
+        on conflict(module, summary_month)
+        do update set
+            total_count = excluded.total_count,
+            metrics_json = excluded.metrics_json,
+            archived_at = excluded.archived_at,
+            archived_by = excluded.archived_by
+        """,
+        (module, month, total, json.dumps(detail, ensure_ascii=False), archived_at, actor_nik),
+    )
+
+
+def archive_module_by_month(conn, module: str, table: str, date_expr: str, cutoff: str, actor_nik: str, extra_metrics_sql: str = "") -> int:
+    now = datetime.now().isoformat(timespec="seconds")
+    month_rows = conn.execute(
+        f"""
+        select substr({date_expr}, 1, 7) as summary_month, count(*) as total_count {extra_metrics_sql}
+        from {table}
+        where {date_expr} is not null
+          and {date_expr} != ''
+          and {date_expr} < ?
+          and (archived_at is null or archived_at = '')
+        group by substr({date_expr}, 1, 7)
+        """,
+        (cutoff,),
+    ).fetchall()
+    total = 0
+    for item in month_rows:
+        month = item["summary_month"]
+        count = int(item["total_count"] or 0)
+        detail = {key: item[key] for key in item.keys() if key not in {"summary_month", "total_count"}}
+        upsert_monthly_summary(conn, module, month, count, detail, actor_nik, now)
+        total += count
+    result = conn.execute(
+        f"""
+        update {table}
+        set archived_at = ?, archived_by = ?
+        where {date_expr} is not null
+          and {date_expr} != ''
+          and {date_expr} < ?
+          and (archived_at is null or archived_at = '')
+        """,
+        (now, actor_nik, cutoff),
+    )
+    audit_data_management(conn, actor_nik, "ARCHIVE", module, cutoff, result.rowcount, {"summary_rows": len(month_rows)})
+    return result.rowcount
+
+
+def archive_old_operational_data(actor_nik: str, cutoff: str) -> dict:
+    affected: dict[str, int] = {}
+    with db() as conn:
+        affected["trip_requests"] = archive_module_by_month(
+            conn,
+            "trip_requests",
+            "trip_requests",
+            "coalesce(end_date, start_date, travel_date, substr(created_at, 1, 10))",
+            cutoff,
+            actor_nik,
+            ", sum(case when status = 'completed' then 1 else 0 end) as completed_count, sum(case when coalesce(rating, 0) > 0 then 1 else 0 end) as reviewed_count",
+        )
+        affected["p2h_reports"] = archive_module_by_month(conn, "p2h_reports", "p2h_reports", "report_date", cutoff, actor_nik, ", sum(case when status_p2h = 'Perlu Follow Up GA' then 1 else 0 end) as follow_up_count")
+        affected["vehicle_maintenance_history"] = archive_module_by_month(conn, "vehicle_maintenance_history", "vehicle_maintenance_history", "coalesce(service_date, substr(created_at, 1, 10))", cutoff, actor_nik)
+        conn.commit()
+    return affected
+
+
+def delete_old_logs(actor_nik: str, cutoff: str) -> int:
+    with db() as conn:
+        result = conn.execute("delete from system_logs where substr(created_at, 1, 10) < ?", (cutoff,))
+        audit_data_management(conn, actor_nik, "DELETE_OLD_LOGS", "system_logs", cutoff, result.rowcount)
+        conn.commit()
+        return result.rowcount
+
+
+def delete_testing_data(actor_nik: str, before_date: str | None = None) -> dict:
+    affected: dict[str, int] = {}
+    before_date = before_date or datetime.now().date().isoformat()
+    with db() as conn:
+        trip_result = conn.execute(
+            """
+            delete from trip_requests
+            where substr(created_at, 1, 10) <= ?
+              and (
+                upper(request_code) like 'TEST%%'
+                or upper(destination) like '%%TEST%%'
+                or upper(purpose) like '%%TEST%%'
+                or upper(coalesce(notes, '')) like '%%TEST%%'
+              )
+            """,
+            (before_date,),
+        )
+        affected["trip_requests"] = trip_result.rowcount
+        p2h_ids = [item["id"] for item in conn.execute(
+            """
+            select id from p2h_reports
+            where substr(created_at, 1, 10) <= ?
+              and (
+                upper(coalesce(general_note, '')) like '%%TEST%%'
+                or upper(coalesce(damage_note, '')) like '%%TEST%%'
+                or upper(coalesce(recommendation, '')) like '%%TEST%%'
+              )
+            """,
+            (before_date,),
+        ).fetchall()]
+        if p2h_ids:
+            placeholders = ",".join("?" for _ in p2h_ids)
+            affected["p2h_checklist_items"] = conn.execute(f"delete from p2h_checklist_items where p2h_report_id in ({placeholders})", tuple(p2h_ids)).rowcount
+            affected["p2h_attachments"] = conn.execute(f"delete from p2h_attachments where p2h_report_id in ({placeholders})", tuple(p2h_ids)).rowcount
+            affected["p2h_reports"] = conn.execute(f"delete from p2h_reports where id in ({placeholders})", tuple(p2h_ids)).rowcount
+        else:
+            affected["p2h_checklist_items"] = 0
+            affected["p2h_attachments"] = 0
+            affected["p2h_reports"] = 0
+        total = sum(affected.values())
+        audit_data_management(conn, actor_nik, "DELETE_TESTING_DATA", "transaction_testing", before_date, total, affected)
+        conn.commit()
+    return affected
+
+
 def sync_driver_record(conn: sqlite3.Connection, nik: str, full_name: str, position: str, phone: str, roles: list[str]) -> None:
     existing = conn.execute("select id from drivers where nik = ?", (nik,)).fetchone()
     if "driver" in roles:
@@ -1318,6 +1568,33 @@ def seed_data() -> None:
                 original_name text,
                 uploaded_at text not null
             );
+            create table if not exists data_monthly_summaries (
+                module text not null,
+                summary_month text not null,
+                total_count integer not null default 0,
+                metrics_json text,
+                archived_at text not null,
+                archived_by text,
+                primary key (module, summary_month)
+            );
+            create table if not exists data_management_audit (
+                id integer primary key autoincrement,
+                actor_nik text not null,
+                action text not null,
+                target_module text,
+                cutoff_date text,
+                affected_rows integer not null default 0,
+                detail_json text,
+                created_at text not null
+            );
+            create table if not exists system_logs (
+                id integer primary key autoincrement,
+                level text not null default 'INFO',
+                module text,
+                message text,
+                detail_json text,
+                created_at text not null
+            );
             create table if not exists p2h_holidays (
                 holiday_date text primary key,
                 name text not null
@@ -1347,6 +1624,8 @@ def seed_data() -> None:
         add_column_if_missing(conn, "trip_requests", "review_proof_file", "text")
         add_column_if_missing(conn, "trip_requests", "review_proof_original_name", "text")
         add_column_if_missing(conn, "trip_requests", "review_proof_uploaded_at", "text")
+        add_column_if_missing(conn, "trip_requests", "archived_at", "text")
+        add_column_if_missing(conn, "trip_requests", "archived_by", "text")
         add_column_if_missing(conn, "drivers", "default_vehicle_id", "integer")
         add_column_if_missing(conn, "drivers", "sim_expiry_date", "text")
         add_column_if_missing(conn, "vehicles", "vehicle_type", "text not null default 'Operational'")
@@ -1362,6 +1641,10 @@ def seed_data() -> None:
         add_column_if_missing(conn, "vehicles", "assigned_to_type", "text")
         add_column_if_missing(conn, "vehicles", "assigned_to_name", "text")
         add_column_if_missing(conn, "vehicles", "assigned_note", "text")
+        add_column_if_missing(conn, "p2h_reports", "archived_at", "text")
+        add_column_if_missing(conn, "p2h_reports", "archived_by", "text")
+        add_column_if_missing(conn, "vehicle_maintenance_history", "archived_at", "text")
+        add_column_if_missing(conn, "vehicle_maintenance_history", "archived_by", "text")
         remove_p2h_unique_constraint_if_needed(conn)
         conn.execute("update trip_requests set start_date = travel_date where start_date is null or start_date = ''")
         conn.execute("update trip_requests set end_date = travel_date where end_date is null or end_date = ''")
@@ -1394,16 +1677,6 @@ def seed_data() -> None:
                 f"update trip_requests set status = ? where status in ({','.join('?' for _ in aliases)})",
                 (canonical, *aliases),
             )
-        conn.execute(
-            """
-            delete from trip_requests
-            where status = ?
-              and coalesce(rating, 0) > 0
-              and coalesce(end_date, travel_date) < ?
-            """,
-            (STATUS_COMPLETED, cutoff_date()),
-        )
-
         conn.execute("delete from employee_roles where nik in (select nik from employees where active = 0)")
         conn.execute("delete from employees where active = 0")
 
@@ -2633,6 +2906,58 @@ def delete_backup(filename: str):
         return error_response(f"Backup gagal: {exc}", "backup-restore", 500)
 
 
+@app.post("/data-management/archive")
+def data_management_archive():
+    emp = current_employee()
+    if not has_role(emp, "ga_admin", "super_admin"):
+        return error_response("Unauthorized", "data-management", 403)
+    if request.form.get("confirm") != "yes":
+        return error_response("Confirmation required", "data-management", 400)
+    cutoff = request.form.get("cutoff_date", "").strip()
+    if not cutoff:
+        cutoff = (datetime.now().date() - timedelta(days=365)).isoformat()
+    try:
+        datetime.strptime(cutoff, "%Y-%m-%d")
+    except ValueError:
+        return error_response("Invalid date", "data-management", 400)
+    affected = archive_old_operational_data(emp["nik"], cutoff)
+    total = sum(affected.values())
+    return ok_response("data-management", f"Archive selesai: {total} data ditandai arsip.")
+
+
+@app.post("/data-management/delete-testing")
+def data_management_delete_testing():
+    emp = current_employee()
+    if not has_role(emp, "ga_admin", "super_admin"):
+        return error_response("Unauthorized", "data-management", 403)
+    if request.form.get("confirm") != "yes":
+        return error_response("Confirmation required", "data-management", 400)
+    before_date = request.form.get("before_date", "").strip() or datetime.now().date().isoformat()
+    try:
+        datetime.strptime(before_date, "%Y-%m-%d")
+    except ValueError:
+        return error_response("Invalid date", "data-management", 400)
+    affected = delete_testing_data(emp["nik"], before_date)
+    total = sum(affected.values())
+    return ok_response("data-management", f"Data testing terhapus: {total} baris.")
+
+
+@app.post("/data-management/delete-old-logs")
+def data_management_delete_old_logs():
+    emp = current_employee()
+    if not has_role(emp, "ga_admin", "super_admin"):
+        return error_response("Unauthorized", "data-management", 403)
+    if request.form.get("confirm") != "yes":
+        return error_response("Confirmation required", "data-management", 400)
+    cutoff = request.form.get("cutoff_date", "").strip() or (datetime.now().date() - timedelta(days=30)).isoformat()
+    try:
+        datetime.strptime(cutoff, "%Y-%m-%d")
+    except ValueError:
+        return error_response("Invalid date", "data-management", 400)
+    deleted = delete_old_logs(emp["nik"], cutoff)
+    return ok_response("data-management", f"Log lama terhapus: {deleted} baris.")
+
+
 @app.post("/vehicles/<int:vehicle_id>/delete")
 def delete_vehicle(vehicle_id: int):
     emp = current_employee()
@@ -3811,6 +4136,7 @@ def api_data():
         "p2h_holidays": [],
         "p2h_workday_overrides": [],
         "backup_history": [],
+        "data_management": {},
         "can_restore_backup": has_role(emp, "super_admin"),
         "can_edit_vehicle_km": has_role(emp, "super_admin"),
         "can_delete_maintenance_history": has_role(emp, "super_admin"),
@@ -3865,6 +4191,7 @@ def api_data():
         data["p2h_holidays"] = p2h_holidays()
         data["p2h_workday_overrides"] = p2h_workday_overrides()
         data["backup_history"] = backup_history()
+        data["data_management"] = data_management_status()
     data["p2h_alerts"] = get_p2h_alerts(emp)
     data["notifications"] = task_notifications(emp)
     if has_role(emp, "super_admin"):

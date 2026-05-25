@@ -32,6 +32,9 @@ TABLES = [
     "p2h_reports",
     "p2h_checklist_items",
     "p2h_attachments",
+    "data_monthly_summaries",
+    "data_management_audit",
+    "system_logs",
     "p2h_holidays",
     "p2h_workday_overrides",
 ]

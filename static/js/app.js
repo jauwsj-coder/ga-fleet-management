@@ -22,6 +22,7 @@ const I18N = {
   id: {
     logout: "Logout",
     appEyebrow: "Manajemen Armada & Kendaraan",
+    count: "Jumlah",
     vehicleDocumentNotifications: "Notifikasi dokumen kendaraan",
     navDashboard: "Dasbor",
     navDriverScheduleDashboard: "Dasbor Jadwal Driver",
@@ -38,6 +39,7 @@ const I18N = {
     navP2hChecklist: "Checklist P2H",
     navP2hReport: "Laporan P2H",
     navGuide: "Panduan & Teknis",
+    navDataManagement: "Manajemen Data",
     p2hChecklistTitle: "Checklist P2H",
     p2hChecklistSubtitle: "Pemeriksaan dan pengecekan harian kendaraan oleh driver.",
     p2hReportTitle: "Laporan P2H",
@@ -118,6 +120,28 @@ const I18N = {
     confirmRestoreBackup: "Pulihkan database dari cadangan ini? Data saat ini akan diganti.",
     confirmDeleteBackup: "Hapus file cadangan ini secara permanen?",
     noBackupHistory: "Belum ada cadangan database.",
+    dataManagementTitle: "Manajemen Data",
+    dataManagementSubtitle: "Kelola ukuran data, arsip operasional, dan pembersihan data rendah prioritas secara aman.",
+    databaseSize: "Ukuran Database",
+    masterData: "Master Data",
+    transactionData: "Data Transaksi",
+    temporaryData: "Data Sementara",
+    archivedData: "Data Diarsipkan",
+    retentionRules: "Aturan Retensi",
+    archiveOldData: "Arsipkan Data Lama",
+    archiveCutoffDate: "Arsip sebelum tanggal",
+    deleteTestingData: "Hapus Data Testing",
+    deleteOldLogs: "Hapus Log Lama",
+    logCutoffDate: "Hapus log sebelum tanggal",
+    testingCutoffDate: "Hapus testing sampai tanggal",
+    dataManagementAudit: "Audit Manajemen Data",
+    archiveSummary: "Ringkasan Arsip Bulanan",
+    confirmArchiveData: "Arsipkan data operasional lama? Master data tidak akan dihapus.",
+    confirmDeleteTestingData: "Hapus data testing yang terdeteksi? Master data tidak akan dihapus.",
+    confirmDeleteOldLogs: "Hapus log lama? Master data tidak akan dihapus.",
+    protectedData: "Dilindungi",
+    noAuditLog: "Belum ada audit.",
+    noArchiveSummary: "Belum ada ringkasan arsip.",
     guideSubtitle: "Cari scope role, flow, aturan, dan langkah penggunaan sistem.",
     guideSearchLabel: "Cari Panduan",
     guideSearchPlaceholder: "Cari booking, approval, driver, review...",
@@ -453,6 +477,7 @@ const I18N = {
   en: {
     logout: "Logout",
     appEyebrow: "Fleet & Vehicle Management",
+    count: "Count",
     vehicleDocumentNotifications: "Vehicle document notifications",
     navDashboard: "Dashboard",
     navDriverScheduleDashboard: "Driver Schedule Dashboard",
@@ -469,6 +494,7 @@ const I18N = {
     navP2hChecklist: "P2H Checklist",
     navP2hReport: "P2H Report",
     navGuide: "Guide & Technical",
+    navDataManagement: "Data Management",
     p2hChecklistTitle: "P2H Checklist",
     p2hChecklistSubtitle: "Daily vehicle inspection and checking by drivers.",
     p2hReportTitle: "P2H Report",
@@ -549,6 +575,28 @@ const I18N = {
     confirmRestoreBackup: "Restore database from this backup? Current data will be replaced.",
     confirmDeleteBackup: "Permanently delete this backup file?",
     noBackupHistory: "No database backup yet.",
+    dataManagementTitle: "Data Management",
+    dataManagementSubtitle: "Manage data size, operational archive, and safe low-priority cleanup.",
+    databaseSize: "Database Size",
+    masterData: "Master Data",
+    transactionData: "Transaction Data",
+    temporaryData: "Temporary Data",
+    archivedData: "Archived Data",
+    retentionRules: "Retention Rules",
+    archiveOldData: "Archive Old Data",
+    archiveCutoffDate: "Archive before date",
+    deleteTestingData: "Delete Testing Data",
+    deleteOldLogs: "Delete Old Logs",
+    logCutoffDate: "Delete logs before date",
+    testingCutoffDate: "Delete testing until date",
+    dataManagementAudit: "Data Management Audit",
+    archiveSummary: "Monthly Archive Summary",
+    confirmArchiveData: "Archive old operational data? Master data will not be deleted.",
+    confirmDeleteTestingData: "Delete detected testing data? Master data will not be deleted.",
+    confirmDeleteOldLogs: "Delete old logs? Master data will not be deleted.",
+    protectedData: "Protected",
+    noAuditLog: "No audit yet.",
+    noArchiveSummary: "No archive summary yet.",
     guideSubtitle: "Search role scope, flows, rules, and system steps.",
     guideSearchLabel: "Search Guide",
     guideSearchPlaceholder: "Search booking, approval, driver, review...",
@@ -1454,6 +1502,7 @@ function renderAllSections() {
     ["employees", renderEmployees],
     ["optionManager", renderOptionManager],
     ["driverScheduleDashboard", renderDriverScheduleDashboard],
+    ["dataManagement", renderDataManagement],
     ["backupRestore", renderBackupRestore],
     ["guide", renderGuide],
   ].forEach(([name, callback]) => safeRender(name, callback));
@@ -3052,6 +3101,56 @@ function renderP2hChartFallback(performance, reports) {
     const drivers = (performance.driver_performance || []).slice(0, 10);
     consistencyCard.innerHTML = `<h4>${t("driverConsistencyPerformance")}</h4><div class="p2h-consistency-fallback">${drivers.map((item) => `<div><span>${escapeHtml(item.driver_name)}</span><strong><i style="width:${Math.min(100, item.consistency || 0)}%"></i></strong><em>${item.consistency || 0}%</em></div>`).join("")}</div>`;
   }
+}
+
+function renderDataManagement() {
+  const target = document.getElementById("data-management-content");
+  if (!target) return;
+  const data = appData.data_management || {};
+  const db = data.database || {};
+  const retention = data.retention || {};
+  const oneYearAgo = new Date();
+  oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
+  const thirtyDaysAgo = new Date();
+  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+  const tableRows = (items) => (items || []).map((item) => `
+    <tr>
+      <td><strong>${escapeHtml(item.label || item.table)}</strong><small>${escapeHtml(item.table || "")}</small></td>
+      <td>${item.exists ? moneyFormatter.format(item.count || 0) : "-"}</td>
+      <td>${moneyFormatter.format(item.archived_count || 0)}</td>
+      <td>${item.protected ? `<span class="status-pill safe">${t("protectedData")}</span>` : `<span class="status-pill muted">Archive</span>`}</td>
+    </tr>`).join("");
+  const summaries = data.summaries || [];
+  const audit = data.audit || [];
+  target.innerHTML = `
+    <div class="data-management-grid">
+      <article class="panel data-management-card"><span>${t("databaseSize")}</span><strong>${escapeHtml(db.size_label || "-")}</strong><small>${moneyFormatter.format(db.size_bytes || 0)} bytes</small></article>
+      <article class="panel data-management-card"><span>${t("retentionRules")}</span><strong>${retention.archive_after_days || 365} hari</strong><small>Log ${retention.error_logs_days || 30} hari / Notifikasi ${retention.notifications_days || 60} hari</small></article>
+    </div>
+    <div class="panel">
+      <div class="data-actions-grid">
+        <form method="post" action="/data-management/archive" data-ajax-form data-confirm-key="confirmArchiveData">
+          <input type="hidden" name="confirm" value="yes">
+          <label><span>${t("archiveCutoffDate")}</span><input type="date" name="cutoff_date" value="${dateIsoLocal(oneYearAgo)}"></label>
+          <button class="button primary" type="submit">${t("archiveOldData")}</button>
+        </form>
+        <form method="post" action="/data-management/delete-testing" data-ajax-form data-confirm-key="confirmDeleteTestingData">
+          <input type="hidden" name="confirm" value="yes">
+          <label><span>${t("testingCutoffDate")}</span><input type="date" name="before_date" value="${todayIso()}"></label>
+          <button class="button danger" type="submit">${t("deleteTestingData")}</button>
+        </form>
+        <form method="post" action="/data-management/delete-old-logs" data-ajax-form data-confirm-key="confirmDeleteOldLogs">
+          <input type="hidden" name="confirm" value="yes">
+          <label><span>${t("logCutoffDate")}</span><input type="date" name="cutoff_date" value="${dateIsoLocal(thirtyDaysAgo)}"></label>
+          <button class="button secondary" type="submit">${t("deleteOldLogs")}</button>
+        </form>
+      </div>
+    </div>
+    <div class="panel"><h3>${t("masterData")}</h3><div class="table-wrap"><table class="compact-table"><thead><tr><th>Data</th><th>${t("count")}</th><th>${t("archivedData")}</th><th>Status</th></tr></thead><tbody>${tableRows(data.master)}</tbody></table></div></div>
+    <div class="panel"><h3>${t("transactionData")}</h3><div class="table-wrap"><table class="compact-table"><thead><tr><th>Data</th><th>${t("count")}</th><th>${t("archivedData")}</th><th>Status</th></tr></thead><tbody>${tableRows(data.transaction)}</tbody></table></div></div>
+    <div class="panel"><h3>${t("temporaryData")}</h3><div class="table-wrap"><table class="compact-table"><thead><tr><th>Data</th><th>${t("count")}</th><th>${t("archivedData")}</th><th>Status</th></tr></thead><tbody>${tableRows(data.temporary)}</tbody></table></div></div>
+    <div class="panel"><h3>${t("archiveSummary")}</h3><div class="table-wrap"><table class="compact-table"><thead><tr><th>Module</th><th>Bulan</th><th>${t("count")}</th><th>Archived</th></tr></thead><tbody>${summaries.map((item) => `<tr><td>${escapeHtml(item.module)}</td><td>${formatMonthYear(item.summary_month)}</td><td>${moneyFormatter.format(item.total_count || 0)}</td><td>${formatDateTime(item.archived_at)}</td></tr>`).join("") || `<tr><td colspan="4">${t("noArchiveSummary")}</td></tr>`}</tbody></table></div></div>
+    <div class="panel"><h3>${t("dataManagementAudit")}</h3><div class="table-wrap"><table class="compact-table"><thead><tr><th>Waktu</th><th>User</th><th>Aksi</th><th>Module</th><th>${t("count")}</th></tr></thead><tbody>${audit.map((item) => `<tr><td>${formatDateTime(item.created_at)}</td><td>${escapeHtml(item.actor_nik)}</td><td>${escapeHtml(item.action)}</td><td>${escapeHtml(item.target_module || "-")}</td><td>${moneyFormatter.format(item.affected_rows || 0)}</td></tr>`).join("") || `<tr><td colspan="5">${t("noAuditLog")}</td></tr>`}</tbody></table></div></div>`;
 }
 
 function renderBackupRestore() {

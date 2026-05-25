@@ -69,6 +69,7 @@
       {% endif %}
       <button class="nav-item nav-guide" data-tab="guide" data-i18n="navGuide">Panduan & Teknis</button>
       {% if 'ga_admin' in emp.roles or 'super_admin' in emp.roles %}
+      <button class="nav-item" data-tab="data-management" data-i18n="navDataManagement">Data Management</button>
       <button class="nav-item" data-tab="backup-restore" data-i18n="navBackupRestore">Backup & Restore</button>
       {% endif %}
     </aside>
@@ -408,6 +409,18 @@
           <div id="guide-content" class="guide-grid"></div>
         </div>
       </section>
+
+      {% if 'ga_admin' in emp.roles or 'super_admin' in emp.roles %}
+      <section id="data-management" class="tab-panel">
+        <div class="section-head">
+          <div>
+            <h2 data-i18n="dataManagementTitle">Data Management</h2>
+            <p data-i18n="dataManagementSubtitle">Kelola ukuran data, arsip operasional, dan pembersihan data rendah prioritas secara aman.</p>
+          </div>
+        </div>
+        <div id="data-management-content"></div>
+      </section>
+      {% endif %}
     </section>
   </main>
 
