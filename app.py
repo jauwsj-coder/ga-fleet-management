@@ -328,10 +328,14 @@ ASSIGNMENT_BUFFER = timedelta(hours=2)
 
 DEFAULT_POSITION_OPTIONS = [
     "Direktur HRGA",
+    "Driver",
     "Manager Finance",
     "Manager GA",
     "Manager Marketing",
     "Manager Procurement",
+    "Staff Finance",
+    "Staff GA",
+    "Super Admin",
 ]
 
 DEFAULT_DEPARTMENT_OPTIONS = [
@@ -341,6 +345,15 @@ DEFAULT_DEPARTMENT_OPTIONS = [
     "Operasional",
     "Procurement",
 ]
+
+DEFAULT_EMPLOYEE_ACCOUNTS = [
+    ("1001", "SUPER ADMIN", "Direktur HRGA", "HRGA", None, "088880001", ["super_admin"]),
+    ("1002", "GA ADMIN", "Staff GA", "HRGA", "1001", "088880002", ["ga_admin"]),
+    ("1003", "DRIVER", "Driver", "HRGA", "1002", "088880003", ["driver"]),
+    ("1004", "LEADER / MANAGER", "Manager Finance", "Finance", "1001", "088880004", ["pimpinan"]),
+    ("1005", "STAFF", "Staff Finance", "Finance", "1004", "088880005", ["user"]),
+]
+DEFAULT_EMPLOYEE_SEED_VERSION = "1001-1005-v1"
 
 MAINTENANCE_REFERENCE_DEFAULTS = {
     "toyota": "https://toyotaastrido.co.id/servis-mobil/service-berkala/",
@@ -1063,6 +1076,42 @@ def sync_driver_record(conn: sqlite3.Connection, nik: str, full_name: str, posit
         conn.execute("update drivers set status = 'INACTIVE' where nik = ?", (nik,))
 
 
+def ensure_default_employee_accounts(conn: sqlite3.Connection) -> None:
+    marker = conn.execute("select value from app_meta where key = 'default_employee_seed'").fetchone()
+    if marker and marker["value"] == DEFAULT_EMPLOYEE_SEED_VERSION:
+        return
+
+    for nik, name, position, department, supervisor, phone, emp_roles in DEFAULT_EMPLOYEE_ACCOUNTS:
+        existing = conn.execute("select nik from employees where nik = ?", (nik,)).fetchone()
+        if existing:
+            conn.execute(
+                """
+                update employees
+                set full_name = ?, position = ?, department = ?, supervisor_nik = ?, phone = ?, active = 1
+                where nik = ?
+                """,
+                (name, position, department, supervisor, phone, nik),
+            )
+        else:
+            conn.execute(
+                """
+                insert into employees
+                (nik, full_name, position, department, supervisor_nik, phone, active)
+                values (?, ?, ?, ?, ?, ?, 1)
+                """,
+                (nik, name, position, department, supervisor, phone),
+            )
+        conn.execute("delete from employee_roles where nik = ?", (nik,))
+        for role_name in emp_roles:
+            conn.execute("insert or ignore into employee_roles (nik, role) values (?, ?)", (nik, role_name))
+        sync_driver_record(conn, nik, name, position, phone, emp_roles)
+
+    conn.execute(
+        "insert or replace into app_meta (key, value) values (?, ?)",
+        ("default_employee_seed", DEFAULT_EMPLOYEE_SEED_VERSION),
+    )
+
+
 def roles_for(nik: str) -> list[str]:
     return [item["role"] for item in rows("select role from employee_roles where nik = ?", (nik,))]
 
@@ -1686,23 +1735,15 @@ def seed_data() -> None:
             conn.execute("insert or ignore into option_lists (kind, value) values ('department', ?)", (value,))
 
         seeded = conn.execute("select value from app_meta where key = 'seeded'").fetchone()
-        employee_count = conn.execute("select count(*) from employees").fetchone()[0]
-        if not seeded and employee_count > 0:
+        employee_count_before_default = conn.execute("select count(*) from employees").fetchone()[0]
+        ensure_default_employee_accounts(conn)
+        if not seeded and employee_count_before_default > 0:
             conn.execute("insert or replace into app_meta (key, value) values ('seeded', '1')")
             conn.commit()
             return
 
         if not seeded:
-            employees = [
-                ("102145", "BUDI SANTOSO", "STAFF FINANCE", "FINANCE", "102146", "08123456789", ["user"]),
-                ("102148", "SITI RAHAYU", "STAFF MARKETING", "MARKETING", "102146", "08125550001", ["user"]),
-                ("102146", "IBU RINA", "FINANCE MANAGER", "FINANCE", None, "08129876543", ["pimpinan"]),
-                ("102147", "AHMAD FAUZI", "GA ADMIN", "GENERAL AFFAIRS", "900001", "081233344455", ["ga_admin"]),
-                ("200145", "BUDI SETIAWAN", "DRIVER OPERASIONAL", "GENERAL AFFAIRS", "102147", "081211122233", ["driver"]),
-                ("200146", "ANDI WIJAYA", "DRIVER DIREKSI", "GENERAL AFFAIRS", "102147", "081299988877", ["driver"]),
-                ("900001", "DEWI LESTARI", "KEPALA GA", "GENERAL AFFAIRS", None, "081200000001", ["super_admin", "pimpinan", "ga_admin"]),
-            ]
-            for nik, name, position, department, supervisor, phone, emp_roles in employees:
+            for nik, name, position, department, supervisor, phone, emp_roles in DEFAULT_EMPLOYEE_ACCOUNTS:
                 conn.execute(
                     """
                     insert or ignore into employees
@@ -1713,10 +1754,10 @@ def seed_data() -> None:
                 )
                 for role_name in emp_roles:
                     conn.execute("insert or ignore into employee_roles (nik, role) values (?, ?)", (nik, role_name))
+                sync_driver_record(conn, nik, name, position, phone, emp_roles)
 
             for nik, driver_name, position, phone, status in [
-                ("200145", "BUDI SETIAWAN", "DRIVER OPERASIONAL", "081211122233", "ACTIVE"),
-                ("200146", "ANDI WIJAYA", "DRIVER DIREKSI", "081299988877", "ACTIVE"),
+                ("1003", "DRIVER", "Driver", "088880003", "ACTIVE"),
             ]:
                 conn.execute(
                     """

@@ -1694,6 +1694,24 @@ async function addDropdownOption(select) {
   select.value = result.value;
 }
 
+async function addManagedOption(kind) {
+  const input = document.querySelector(`[data-option-input="${kind}"]`);
+  const value = input?.value.trim();
+  if (!value) return;
+  const response = await fetch("/options", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ kind, value }),
+  });
+  const result = await response.json();
+  if (!result.ok) return window.alert(result.message || "Failed");
+  if (kind === "position") appData.options.positions = result.options;
+  if (kind === "department") appData.options.departments = result.options;
+  if (input) input.value = "";
+  renderOptionSelects();
+  renderOptionManager();
+}
+
 async function deleteDropdownOption(kind, value) {
   if (!window.confirm(`${t("delete")} "${value}"?`)) return;
   const response = await fetch("/options/delete", {
@@ -3327,8 +3345,15 @@ function renderOptionManager() {
   const departmentTarget = document.getElementById("department-option-list");
   if (!positionTarget || !departmentTarget) return;
   const renderChips = (kind, values) => sortedOptions(values).map((value) => `<span class="option-chip">${escapeHtml(value)}<button type="button" title="${t("delete")}" data-delete-option data-kind="${kind}" data-value="${escapeHtml(value)}">x</button></span>`).join("");
-  positionTarget.innerHTML = renderChips("position", appData.options?.positions || []);
-  departmentTarget.innerHTML = renderChips("department", appData.options?.departments || []);
+  const renderManager = (kind, values, label) => `
+    <div class="option-chip-list">${renderChips(kind, values)}</div>
+    <div class="option-add-row">
+      <input type="text" data-option-input="${kind}" placeholder="${escapeHtml(t("addOther"))} ${escapeHtml(label)}">
+      <button class="button secondary small" type="button" data-add-option="${kind}">${escapeHtml(t("addOther"))}</button>
+    </div>
+  `;
+  positionTarget.innerHTML = renderManager("position", appData.options?.positions || [], t("position"));
+  departmentTarget.innerHTML = renderManager("department", appData.options?.departments || [], t("department"));
 }
 
 function renderGuide() {
@@ -3557,6 +3582,8 @@ document.addEventListener("click", (event) => {
   }
   const editButton = event.target.closest("[data-edit-employee]");
   if (editButton) openEmployeeModal(editButton.dataset.editEmployee);
+  const addOptionButton = event.target.closest("[data-add-option]");
+  if (addOptionButton) addManagedOption(addOptionButton.dataset.addOption);
   const optionButton = event.target.closest("[data-delete-option]");
   if (optionButton) deleteDropdownOption(optionButton.dataset.kind, optionButton.dataset.value);
   const calendarDay = event.target.closest("[data-calendar-date]");

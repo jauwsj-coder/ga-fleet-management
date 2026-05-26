@@ -628,6 +628,27 @@ select {
   gap: 8px;
 }
 
+.option-manager .option-list {
+  display: block;
+}
+
+.option-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.option-add-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.option-add-row input {
+  min-width: 220px;
+  max-width: 360px;
+}
+
 .option-chip {
   display: inline-flex;
   align-items: center;
