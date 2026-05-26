@@ -584,20 +584,21 @@ def cutoff_date() -> str:
 
 
 def table_columns(conn, table_name: str) -> set[str]:
-    if USE_POSTGRES and hasattr(conn, "reconnect_if_closed"):
-        conn.reconnect_if_closed()
     if USE_POSTGRES:
-        return {
-            item["column_name"]
-            for item in conn.execute(
-                """
-                select column_name
-                from information_schema.columns
-                where table_schema = 'public' and table_name = ?
-                """,
-                (table_name,),
-            ).fetchall()
-        }
+        query = """
+            select column_name
+            from information_schema.columns
+            where table_schema = 'public' and table_name = ?
+        """
+        try:
+            if hasattr(conn, "reconnect_if_closed"):
+                conn.reconnect_if_closed()
+            result = conn.execute(query, (table_name,)).fetchall()
+        except (psycopg2.InterfaceError, psycopg2.OperationalError):
+            logger.exception("PostgreSQL connection failed in table_columns; retrying with fresh connection.")
+            with db() as fresh_conn:
+                result = fresh_conn.execute(query, (table_name,)).fetchall()
+        return {item["column_name"] for item in result}
     return {item["name"] for item in conn.execute(f"pragma table_info({table_name})").fetchall()}
 
 
@@ -607,19 +608,21 @@ def add_column_if_missing(conn, table_name: str, column_name: str, definition: s
 
 
 def list_tables(conn) -> set[str]:
-    if USE_POSTGRES and hasattr(conn, "reconnect_if_closed"):
-        conn.reconnect_if_closed()
     if USE_POSTGRES:
-        return {
-            item["table_name"]
-            for item in conn.execute(
-                """
-                select table_name
-                from information_schema.tables
-                where table_schema = 'public' and table_type = 'BASE TABLE'
-                """
-            ).fetchall()
-        }
+        query = """
+            select table_name
+            from information_schema.tables
+            where table_schema = 'public' and table_type = 'BASE TABLE'
+        """
+        try:
+            if hasattr(conn, "reconnect_if_closed"):
+                conn.reconnect_if_closed()
+            result = conn.execute(query).fetchall()
+        except (psycopg2.InterfaceError, psycopg2.OperationalError):
+            logger.exception("PostgreSQL connection failed in list_tables; retrying with fresh connection.")
+            with db() as fresh_conn:
+                result = fresh_conn.execute(query).fetchall()
+        return {item["table_name"] for item in result}
     return {item["name"] for item in conn.execute("select name from sqlite_master where type = 'table'").fetchall()}
 
 
@@ -907,12 +910,38 @@ def database_size_info() -> dict:
 
 
 def count_table(conn, table: str, where: str = "1=1", params: tuple = ()) -> int:
-    if USE_POSTGRES and hasattr(conn, "reconnect_if_closed"):
-        conn.reconnect_if_closed()
     if table not in list_tables(conn):
         return 0
-    item = conn.execute(f"select count(*) as total from {table} where {where}", params).fetchone()
+    query = f"select count(*) as total from {table} where {where}"
+    if not USE_POSTGRES:
+        item = conn.execute(query, params).fetchone()
+        return int(item["total"] if isinstance(item, dict) else item[0])
+    try:
+        if hasattr(conn, "reconnect_if_closed"):
+            conn.reconnect_if_closed()
+        item = conn.execute(query, params).fetchone()
+    except (psycopg2.InterfaceError, psycopg2.OperationalError):
+        logger.exception("PostgreSQL connection failed in count_table; retrying with fresh connection.")
+        with db() as fresh_conn:
+            item = fresh_conn.execute(query, params).fetchone()
     return int(item["total"] if isinstance(item, dict) else item[0])
+
+
+def empty_data_management_status(error: str | None = None) -> dict:
+    return {
+        "database": database_size_info(),
+        "master": [],
+        "transaction": [],
+        "temporary": [],
+        "retention": {
+            "error_logs_days": 30,
+            "notifications_days": 60,
+            "archive_after_days": 365,
+        },
+        "summaries": [],
+        "audit": [],
+        "error": error or "",
+    }
 
 
 def data_management_status() -> dict:
@@ -4284,7 +4313,11 @@ def api_data():
         data["p2h_holidays"] = p2h_holidays()
         data["p2h_workday_overrides"] = p2h_workday_overrides()
         data["backup_history"] = backup_history()
-        data["data_management"] = data_management_status()
+        try:
+            data["data_management"] = data_management_status()
+        except Exception as exc:
+            logger.exception("Data management status failed; returning fallback so /api/data stays available.")
+            data["data_management"] = empty_data_management_status(str(exc))
     data["p2h_alerts"] = get_p2h_alerts(emp)
     data["notifications"] = task_notifications(emp)
     if has_role(emp, "super_admin"):
