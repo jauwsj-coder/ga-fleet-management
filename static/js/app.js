@@ -1,5 +1,5 @@
 const moneyFormatter = new Intl.NumberFormat("id-ID");
-let appData = null;
+let appData = { options: { positions: [], departments: [] } };
 let lang = "id";
 let dashboardPage = 1;
 let performanceStartMonth = "";
@@ -388,6 +388,8 @@ const I18N = {
     file: "File",
     odometer: "Odometer",
     noData: "Tidak ada data.",
+    noPositionData: "Belum ada data jabatan",
+    noDepartmentData: "Belum ada data departemen",
     supervisor: "Pimpinan",
     employeeDb: "Database Karyawan",
     confirmDeleteEmployee: "Hapus karyawan ini dari database?",
@@ -843,6 +845,8 @@ const I18N = {
     file: "File",
     odometer: "Odometer",
     noData: "No data.",
+    noPositionData: "No position data yet",
+    noDepartmentData: "No department data yet",
     supervisor: "Supervisor",
     employeeDb: "Employee Database",
     confirmDeleteEmployee: "Delete this employee from the database?",
@@ -1651,7 +1655,15 @@ function sortedOptions(options) {
   return [...new Set(options || [])].sort((a, b) => a.localeCompare(b, "id", { sensitivity: "base" }));
 }
 
+function ensureOptionData() {
+  if (!appData) appData = {};
+  if (!appData.options) appData.options = {};
+  if (!Array.isArray(appData.options.positions)) appData.options.positions = [];
+  if (!Array.isArray(appData.options.departments)) appData.options.departments = [];
+}
+
 function renderOptionSelects() {
+  ensureOptionData();
   const configs = [
     { id: "employee-position", kind: "position", placeholder: t("selectPosition"), addLabel: t("addOther"), optionsKey: "positions" },
     { id: "edit-position", kind: "position", placeholder: t("selectPosition"), addLabel: t("addOther"), optionsKey: "positions" },
@@ -1695,6 +1707,7 @@ async function addDropdownOption(select) {
 }
 
 async function addManagedOption(kind) {
+  ensureOptionData();
   const input = document.querySelector(`[data-option-input="${kind}"]`);
   const value = input?.value.trim();
   if (!value) return;
@@ -1705,8 +1718,8 @@ async function addManagedOption(kind) {
   });
   const result = await response.json();
   if (!result.ok) return window.alert(result.message || "Failed");
-  if (kind === "position") appData.options.positions = result.options;
-  if (kind === "department") appData.options.departments = result.options;
+  const key = kind === "position" ? "positions" : "departments";
+  appData.options[key] = Array.isArray(result.options) ? result.options : sortedOptions([...(appData.options[key] || []), result.value || value]);
   if (input) input.value = "";
   renderOptionSelects();
   renderOptionManager();
@@ -3341,19 +3354,23 @@ function renderEmployees() {
 }
 
 function renderOptionManager() {
+  ensureOptionData();
   const positionTarget = document.getElementById("position-option-list");
   const departmentTarget = document.getElementById("department-option-list");
   if (!positionTarget || !departmentTarget) return;
   const renderChips = (kind, values) => sortedOptions(values).map((value) => `<span class="option-chip">${escapeHtml(value)}<button type="button" title="${t("delete")}" data-delete-option data-kind="${kind}" data-value="${escapeHtml(value)}">x</button></span>`).join("");
-  const renderManager = (kind, values, label) => `
-    <div class="option-chip-list">${renderChips(kind, values)}</div>
+  const renderManager = (kind, values, label, emptyText) => {
+    const sorted = sortedOptions(values);
+    return `
+    <div class="option-chip-list">${sorted.length ? renderChips(kind, sorted) : `<span class="option-empty">${escapeHtml(emptyText)}</span>`}</div>
     <div class="option-add-row">
       <input type="text" data-option-input="${kind}" placeholder="${escapeHtml(t("addOther"))} ${escapeHtml(label)}">
       <button class="button secondary small" type="button" data-add-option="${kind}">${escapeHtml(t("addOther"))}</button>
     </div>
   `;
-  positionTarget.innerHTML = renderManager("position", appData.options?.positions || [], t("position"));
-  departmentTarget.innerHTML = renderManager("department", appData.options?.departments || [], t("department"));
+  };
+  positionTarget.innerHTML = renderManager("position", appData.options.positions, t("position"), t("noPositionData"));
+  departmentTarget.innerHTML = renderManager("department", appData.options.departments, t("department"), t("noDepartmentData"));
 }
 
 function renderGuide() {
