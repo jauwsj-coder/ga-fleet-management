@@ -418,44 +418,82 @@ class PgConnection:
     def __init__(self):
         if psycopg2 is None:
             raise RuntimeError("DATABASE_URL is configured, but psycopg2-binary is not installed.")
-        self.conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+        self.conn = self._connect()
+
+    def _connect(self):
+        return psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+
+    def _ensure_open(self) -> None:
+        if self.conn.closed:
+            logger.warning("PostgreSQL connection was closed; opening a new connection.")
+            self.conn = self._connect()
+
+    def _cursor(self):
+        self._ensure_open()
+        return self.conn.cursor()
 
     def __enter__(self):
         return self
 
     def __exit__(self, exc_type, exc, tb):
         try:
-            if exc_type:
-                self.conn.rollback()
-            else:
-                self.conn.commit()
+            if not self.conn.closed:
+                if exc_type:
+                    self.conn.rollback()
+                else:
+                    self.conn.commit()
         finally:
-            self.conn.close()
+            if not self.conn.closed:
+                self.conn.close()
 
     def execute(self, query: str, params: tuple = ()):
-        cursor = self.conn.cursor()
-        cursor.execute(pg_sql(query), params)
+        sql = pg_sql(query)
+        try:
+            cursor = self._cursor()
+            cursor.execute(sql, params)
+        except (psycopg2.InterfaceError, psycopg2.OperationalError):
+            logger.exception("PostgreSQL connection error during execute; reconnecting and retrying once.")
+            self.conn = self._connect()
+            cursor = self._cursor()
+            cursor.execute(sql, params)
         return PgResult(cursor)
 
     def executemany(self, query: str, seq_of_params):
-        cursor = self.conn.cursor()
-        cursor.executemany(pg_sql(query), seq_of_params)
+        sql = pg_sql(query)
+        try:
+            cursor = self._cursor()
+            cursor.executemany(sql, seq_of_params)
+        except (psycopg2.InterfaceError, psycopg2.OperationalError):
+            logger.exception("PostgreSQL connection error during executemany; reconnecting and retrying once.")
+            self.conn = self._connect()
+            cursor = self._cursor()
+            cursor.executemany(sql, seq_of_params)
         return PgResult(cursor)
 
     def executescript(self, script: str) -> None:
-        cursor = self.conn.cursor()
+        statements = []
         for statement in script.split(";"):
             statement = statement.strip()
-            if not statement:
-                continue
-            statement = statement.replace("integer primary key autoincrement", "serial primary key")
-            cursor.execute(pg_sql(statement))
+            if statement:
+                statements.append(statement.replace("integer primary key autoincrement", "serial primary key"))
+        try:
+            cursor = self._cursor()
+            for statement in statements:
+                cursor.execute(pg_sql(statement))
+        except (psycopg2.InterfaceError, psycopg2.OperationalError):
+            logger.exception("PostgreSQL connection error during executescript; reconnecting and retrying once.")
+            self.conn = self._connect()
+            cursor = self._cursor()
+            for statement in statements:
+                cursor.execute(pg_sql(statement))
 
     def commit(self) -> None:
+        self._ensure_open()
         self.conn.commit()
 
     def rollback(self) -> None:
-        self.conn.rollback()
+        if not self.conn.closed:
+            self.conn.rollback()
 
 
 def db():
