@@ -371,28 +371,23 @@ class RowCompat(dict):
 
 class PgResult:
     def __init__(self, cursor):
-        self.cursor = cursor
-        self._rows: list[RowCompat] | None = None
-        self.lastrowid = None
         self.rowcount = cursor.rowcount
-
-    def _load_rows(self) -> list[RowCompat]:
-        if self._rows is None:
-            if not self.cursor.description:
-                self._rows = []
-            else:
-                self._rows = [RowCompat(row) for row in self.cursor.fetchall()]
-        return self._rows
+        self.lastrowid = None
+        self._rows: list[RowCompat] = []
+        try:
+            if cursor.description:
+                self._rows = [RowCompat(row) for row in cursor.fetchall()]
+        finally:
+            cursor.close()
 
     def fetchone(self):
-        rows_found = self._load_rows()
-        return rows_found[0] if rows_found else None
+        return self._rows[0] if self._rows else None
 
     def fetchall(self):
-        return self._load_rows()
+        return self._rows
 
     def __iter__(self):
-        return iter(self.fetchall())
+        return iter(self._rows)
 
 
 def pg_sql(query: str) -> str:
@@ -421,12 +416,23 @@ class PgConnection:
         self.conn = self._connect()
 
     def _connect(self):
-        return psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+        return psycopg2.connect(
+            DATABASE_URL,
+            cursor_factory=RealDictCursor,
+            connect_timeout=10,
+            keepalives=1,
+            keepalives_idle=30,
+            keepalives_interval=10,
+            keepalives_count=5,
+        )
 
     def _ensure_open(self) -> None:
         if self.conn.closed:
             logger.warning("PostgreSQL connection was closed; opening a new connection.")
             self.conn = self._connect()
+
+    def reconnect_if_closed(self) -> None:
+        self._ensure_open()
 
     def _cursor(self):
         self._ensure_open()
@@ -451,24 +457,26 @@ class PgConnection:
         try:
             cursor = self._cursor()
             cursor.execute(sql, params)
+            return PgResult(cursor)
         except (psycopg2.InterfaceError, psycopg2.OperationalError):
             logger.exception("PostgreSQL connection error during execute; reconnecting and retrying once.")
             self.conn = self._connect()
             cursor = self._cursor()
             cursor.execute(sql, params)
-        return PgResult(cursor)
+            return PgResult(cursor)
 
     def executemany(self, query: str, seq_of_params):
         sql = pg_sql(query)
         try:
             cursor = self._cursor()
             cursor.executemany(sql, seq_of_params)
+            return PgResult(cursor)
         except (psycopg2.InterfaceError, psycopg2.OperationalError):
             logger.exception("PostgreSQL connection error during executemany; reconnecting and retrying once.")
             self.conn = self._connect()
             cursor = self._cursor()
             cursor.executemany(sql, seq_of_params)
-        return PgResult(cursor)
+            return PgResult(cursor)
 
     def executescript(self, script: str) -> None:
         statements = []
@@ -576,6 +584,8 @@ def cutoff_date() -> str:
 
 
 def table_columns(conn, table_name: str) -> set[str]:
+    if USE_POSTGRES and hasattr(conn, "reconnect_if_closed"):
+        conn.reconnect_if_closed()
     if USE_POSTGRES:
         return {
             item["column_name"]
@@ -597,6 +607,8 @@ def add_column_if_missing(conn, table_name: str, column_name: str, definition: s
 
 
 def list_tables(conn) -> set[str]:
+    if USE_POSTGRES and hasattr(conn, "reconnect_if_closed"):
+        conn.reconnect_if_closed()
     if USE_POSTGRES:
         return {
             item["table_name"]
@@ -895,6 +907,8 @@ def database_size_info() -> dict:
 
 
 def count_table(conn, table: str, where: str = "1=1", params: tuple = ()) -> int:
+    if USE_POSTGRES and hasattr(conn, "reconnect_if_closed"):
+        conn.reconnect_if_closed()
     if table not in list_tables(conn):
         return 0
     item = conn.execute(f"select count(*) as total from {table} where {where}", params).fetchone()
